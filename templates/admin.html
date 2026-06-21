@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manage · ToolShop</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="bar">
+    <h1><a href="/">🛠️ ToolShop</a></h1>
+    <nav class="menu">
+      <a class="admin-link" href="/docs">API Docs</a>
+      <a class="admin-link" href="/">← Back to shop</a>
+    </nav>
+  </header>
+
+  <div class="container">
+    <div id="toast" class="message toast hidden"></div>
+
+    <div class="admin-grid">
+      <!-- Form panel -->
+      <div class="panel">
+        <h2 id="formTitle">Add product</h2>
+        <form id="productForm">
+          <input type="hidden" id="productId">
+          <div class="field">
+            <label for="name">Name *</label>
+            <input type="text" id="name" required>
+          </div>
+          <div class="field">
+            <label for="category">Category</label>
+            <input type="text" id="category">
+          </div>
+          <div class="field">
+            <label for="price">Price</label>
+            <input type="number" id="price" step="0.01" min="0" value="0">
+          </div>
+          <div class="field">
+            <label for="description">Description</label>
+            <textarea id="description" rows="3"></textarea>
+          </div>
+          <div class="field check">
+            <input type="checkbox" id="in_stock" checked>
+            <label for="in_stock" style="margin:0">In stock</label>
+          </div>
+          <button type="submit" class="btn btn-primary" id="submitBtn">Add product</button>
+          <button type="button" class="btn btn-ghost hidden" id="cancelBtn">Cancel</button>
+        </form>
+      </div>
+
+      <!-- Table panel -->
+      <div class="panel">
+        <h2>All products</h2>
+        <table class="admin-table">
+          <thead>
+            <tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th></th></tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('productForm');
+    const tbody = document.getElementById('tbody');
+    const toast = document.getElementById('toast');
+    const formTitle = document.getElementById('formTitle');
+    const submitBtn = document.getElementById('submitBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+
+    const f = {
+      id: document.getElementById('productId'),
+      name: document.getElementById('name'),
+      category: document.getElementById('category'),
+      price: document.getElementById('price'),
+      description: document.getElementById('description'),
+      in_stock: document.getElementById('in_stock'),
+    };
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function showToast(text, type) {
+      toast.textContent = text;
+      toast.className = 'message toast ' + type;
+      setTimeout(() => { toast.className = 'message toast hidden'; }, 3000);
+    }
+
+    async function loadTable() {
+      const res = await fetch('/api/products');
+      const data = await res.json();
+      tbody.innerHTML = '';
+      data.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${p.id}</td>
+          <td>${escapeHtml(p.name)}</td>
+          <td>$${Number(p.price).toFixed(2)}</td>
+          <td class="${p.in_stock ? 'in' : 'out'}">${p.in_stock ? 'Yes' : 'No'}</td>
+          <td><div class="row-actions">
+            <button class="btn btn-ghost btn-sm" data-edit="${p.id}">Edit</button>
+            <button class="btn btn-danger btn-sm" data-del="${p.id}">Delete</button>
+          </div></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function resetForm() {
+      form.reset();
+      f.id.value = '';
+      f.in_stock.checked = true;
+      formTitle.textContent = 'Add product';
+      submitBtn.textContent = 'Add product';
+      cancelBtn.classList.add('hidden');
+    }
+
+    function fillForm(p) {
+      f.id.value = p.id;
+      f.name.value = p.name;
+      f.category.value = p.category || '';
+      f.price.value = p.price;
+      f.description.value = p.description || '';
+      f.in_stock.checked = !!p.in_stock;
+      formTitle.textContent = 'Edit product #' + p.id;
+      submitBtn.textContent = 'Save changes';
+      cancelBtn.classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // Create or update
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const payload = {
+        name: f.name.value.trim(),
+        category: f.category.value.trim(),
+        price: parseFloat(f.price.value) || 0,
+        description: f.description.value.trim(),
+        in_stock: f.in_stock.checked,
+      };
+      const id = f.id.value;
+      const url = id ? '/api/products/' + id : '/api/products';
+      const method = id ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Error saving product', 'error');
+        return;
+      }
+      showToast(id ? 'Product updated.' : 'Product created.', 'info');
+      resetForm();
+      loadTable();
+    });
+
+    cancelBtn.addEventListener('click', resetForm);
+
+    // Edit / delete buttons (event delegation)
+    tbody.addEventListener('click', async e => {
+      const editId = e.target.getAttribute('data-edit');
+      const delId = e.target.getAttribute('data-del');
+
+      if (editId) {
+        const res = await fetch('/api/products/' + editId);
+        const data = await res.json();
+        if (res.ok) fillForm(data);
+        else showToast(data.error || 'Not found', 'error');
+      }
+
+      if (delId) {
+        if (!confirm('Delete product #' + delId + '?')) return;
+        const res = await fetch('/api/products/' + delId, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) { showToast(data.error || 'Error deleting', 'error'); return; }
+        showToast('Product deleted.', 'info');
+        if (f.id.value === delId) resetForm();
+        loadTable();
+      }
+    });
+
+    loadTable();
+  </script>
+</body>
+</html>

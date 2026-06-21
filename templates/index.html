@@ -7,8 +7,12 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <header>
+  <header class="bar">
     <h1><a href="/">🛠️ ToolShop</a></h1>
+    <nav class="menu">
+      <a class="admin-link" href="/docs">API Docs</a>
+      <a class="admin-link" href="/admin">Manage products</a>
+    </nav>
   </header>
 
   <div class="container">

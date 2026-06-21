@@ -193,6 +193,172 @@ def product_page(product_id):
     return render_template("product.html", product_id=product_id)
 
 
+@app.route("/admin")
+def admin_page():
+    return render_template("admin.html")
+
+
+@app.route("/docs")
+def docs_page():
+    return render_template("docs.html")
+
+
+@app.route("/api/openapi.json")
+def openapi_spec():
+    return jsonify(OPENAPI)
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI spec (drives the Swagger UI at /docs)
+# ---------------------------------------------------------------------------
+PRODUCT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "integer", "example": 1},
+        "name": {"type": "string", "example": "Combination Pliers"},
+        "description": {"type": "string", "example": "Durable steel pliers."},
+        "price": {"type": "number", "format": "float", "example": 14.15},
+        "category": {"type": "string", "example": "Pliers"},
+        "in_stock": {"type": "boolean", "example": True},
+    },
+}
+
+PRODUCT_INPUT = {
+    "type": "object",
+    "required": ["name"],
+    "properties": {
+        "name": {"type": "string", "example": "Rubber Mallet"},
+        "description": {"type": "string", "example": "Soft mallet"},
+        "price": {"type": "number", "example": 9.9},
+        "category": {"type": "string", "example": "Hammer"},
+        "in_stock": {"type": "boolean", "example": True},
+    },
+}
+
+OPENAPI = {
+    "openapi": "3.0.3",
+    "info": {
+        "title": "ToolShop API",
+        "version": "1.0.0",
+        "description": "Public REST API for the ToolShop store. Create, read, update, "
+        "delete and search products.",
+    },
+    "servers": [{"url": "/", "description": "This server"}],
+    "tags": [{"name": "Products", "description": "Manage and search products"}],
+    "paths": {
+        "/api/products": {
+            "get": {
+                "tags": ["Products"],
+                "summary": "List / search products",
+                "description": "Returns all products. Use `search` for a partial "
+                "(case-insensitive) name match, or `id` for an exact id.",
+                "parameters": [
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "string"},
+                        "description": "Partial, case-insensitive name match.",
+                        "example": "plier",
+                    },
+                    {
+                        "name": "id",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer"},
+                        "description": "Exact product id. Returns a list (0 or 1 items).",
+                        "example": 3,
+                    },
+                ],
+                "responses": {
+                    "200": {
+                        "description": "A list of products",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": PRODUCT_SCHEMA,
+                                }
+                            }
+                        },
+                    },
+                    "400": {"description": "id is not a number"},
+                },
+            },
+            "post": {
+                "tags": ["Products"],
+                "summary": "Create a product",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": PRODUCT_INPUT}},
+                },
+                "responses": {
+                    "201": {
+                        "description": "Product created",
+                        "content": {"application/json": {"schema": PRODUCT_SCHEMA}},
+                    },
+                    "400": {"description": "name is required"},
+                },
+            },
+        },
+        "/api/products/{id}": {
+            "parameters": [
+                {
+                    "name": "id",
+                    "in": "path",
+                    "required": True,
+                    "schema": {"type": "integer"},
+                    "example": 3,
+                }
+            ],
+            "get": {
+                "tags": ["Products"],
+                "summary": "Get one product by id",
+                "responses": {
+                    "200": {
+                        "description": "The product",
+                        "content": {"application/json": {"schema": PRODUCT_SCHEMA}},
+                    },
+                    "404": {"description": "Product not found"},
+                },
+            },
+            "put": {
+                "tags": ["Products"],
+                "summary": "Update a product",
+                "description": "Any field may be omitted; omitted fields keep their value.",
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": PRODUCT_INPUT}},
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated product",
+                        "content": {"application/json": {"schema": PRODUCT_SCHEMA}},
+                    },
+                    "404": {"description": "Product not found"},
+                },
+            },
+            "delete": {
+                "tags": ["Products"],
+                "summary": "Delete a product",
+                "responses": {
+                    "200": {"description": "Deleted"},
+                    "404": {"description": "Product not found"},
+                },
+            },
+        },
+        "/api/health": {
+            "get": {
+                "tags": ["Products"],
+                "summary": "Health check",
+                "responses": {"200": {"description": "Service is up"}},
+            }
+        },
+    },
+    "components": {"schemas": {"Product": PRODUCT_SCHEMA, "ProductInput": PRODUCT_INPUT}},
+}
+
+
 with app.app_context():
     init_db()
 

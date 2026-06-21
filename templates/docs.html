@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Docs · ToolShop</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui.min.css">
+  <style>
+    /* let Swagger UI use the full width below our header */
+    #swagger-ui { background: #fff; border-radius: 12px; overflow: hidden; }
+    .swagger-ui .topbar { display: none; }
+  </style>
+</head>
+<body>
+  <header class="bar">
+    <h1><a href="/">🛠️ ToolShop</a></h1>
+    <a class="admin-link" href="/">← Back to shop</a>
+  </header>
+
+  <div class="container">
+    <p class="muted">Interactive API reference. Click an endpoint, then
+       <strong>Try it out</strong> to send a real request.</p>
+    <div id="swagger-ui"></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui-bundle.min.js"></script>
+  <script>
+    window.onload = () => {
+      SwaggerUIBundle({
+        url: '/api/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        tryItOutEnabled: true,
+        defaultModelsExpandDepth: -1,
+      });
+    };
+  </script>
+</body>
+</html>
