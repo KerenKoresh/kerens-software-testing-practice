@@ -328,6 +328,11 @@ def guide_page():
     return render_template("guide.html")
 
 
+@app.route("/playground")
+def playground_page():
+    return render_template("playground.html")
+
+
 @app.route("/docs")
 def docs_page():
     return render_template("docs.html")

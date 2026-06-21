@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Python Playground · ToolShop</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+</head>
+<body>
+  <div class="shell">
+
+    <header class="topbar">
+      <div class="brand"><span class="logo"></span> ToolShop</div>
+      <nav class="nav">
+        <a href="/">Home</a>
+        <a href="/guide">Guide</a>
+        <a href="/playground" class="active">Playground</a>
+        <a href="/docs">API Docs</a>
+      </nav>
+      <a class="btn-dark" href="/docs">Public API</a>
+    </header>
+
+    <section class="hero" style="padding-bottom:6px;">
+      <div class="hero-tag">[ PYTHON PLAYGROUND ]</div>
+      <h1>Write Python, run it on the API</h1>
+      <p class="lead" style="max-width:760px;">Write real Python in your browser and run it against the
+        live ToolShop API. Python runs entirely client-side via Pyodide (CPython compiled to
+        WebAssembly), with the <code>requests</code> library wired to call this site. Nothing is
+        sent to a server to execute. A variable <code>BASE</code> is predefined to this site's URL.</p>
+    </section>
+
+    <div class="pg-grid">
+      <div class="pg-pane">
+        <h3>Your code</h3>
+        <div class="editor-wrap"><textarea id="code"></textarea></div>
+        <div class="chips">
+          <span class="chip" data-ex="list">List products</span>
+          <span class="chip" data-ex="create">Create + edit (token)</span>
+          <span class="chip" data-ex="search">Search</span>
+          <span class="chip" data-ex="negative">Negative test (401/403)</span>
+        </div>
+        <div class="pg-bar">
+          <button class="btn btn-accent" id="runBtn" disabled>Run</button>
+          <button class="btn btn-ghost" id="clearBtn">Clear output</button>
+          <span class="pg-status busy" id="status">Loading Python runtime…</span>
+        </div>
+      </div>
+
+      <div class="pg-pane">
+        <h3>Output</h3>
+        <div class="console" id="out"><span class="muted">Output will appear here. Loading Python (this can take a few seconds on first visit)…</span></div>
+      </div>
+    </div>
+
+    <footer class="foot">
+      <span>&copy; 2026 Keren Koresh · ToolShop</span>
+      <span>Runs in your browser · powered by Pyodide</span>
+    </footer>
+
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <script>
+    const BASE = window.location.origin;
+
+    const EXAMPLES = {
+      list:
+`import requests
+
+# BASE is predefined to this site
+r = requests.get(f"{BASE}/api/products")
+print("GET /api/products ->", r.status_code)
+products = r.json()
+print("count:", len(products))
+for p in products[:5]:
+    print(f"  #{p['id']:<3} {p['name']:<22} \${p['price']}")
+`,
+      create:
+`import requests
+
+# Create a product. The response includes a one-time edit_token.
+r = requests.post(f"{BASE}/api/products",
+                  json={"name": "My Test Drill", "price": 49.9, "category": "Drill"})
+print("POST ->", r.status_code)
+data = r.json()
+pid, token = data["id"], data["edit_token"]
+print("created id:", pid, "| editable:", data["editable"])
+
+# Update it using the edit token
+r = requests.put(f"{BASE}/api/products/{pid}",
+                 json={"price": 39.9, "in_stock": False},
+                 headers={"X-Edit-Token": token})
+print("PUT ->", r.status_code, "| new price:", r.json()["price"])
+
+assert r.status_code == 200
+print("All good")
+`,
+      search:
+`import requests
+
+# Partial, case-insensitive name search
+r = requests.get(f"{BASE}/api/products", params={"search": "plier"})
+print("search 'plier':", [p["name"] for p in r.json()])
+
+# Exact id lookup (returns a list of 0 or 1 items)
+r = requests.get(f"{BASE}/api/products", params={"id": 3})
+print("id=3:", r.json())
+`,
+      negative:
+`import requests
+
+# Create something we own
+data = requests.post(f"{BASE}/api/products", json={"name": "Locked Tool", "price": 5}).json()
+pid = data["id"]
+
+# Update WITHOUT a token -> expect 401
+r = requests.put(f"{BASE}/api/products/{pid}", json={"price": 1})
+print("no token   ->", r.status_code, "(expected 401)")
+assert r.status_code == 401
+
+# Update with WRONG token -> expect 403
+r = requests.put(f"{BASE}/api/products/{pid}", json={"price": 1},
+                 headers={"X-Edit-Token": "definitely-wrong"})
+print("wrong token->", r.status_code, "(expected 403)")
+assert r.status_code == 403
+
+print("Negative tests passed")
+`,
+    };
+
+    // CodeMirror editor (falls back to the plain textarea if it fails to load)
+    let editor = null;
+    const ta = document.getElementById('code');
+    ta.value = EXAMPLES.create;
+    try {
+      editor = CodeMirror.fromTextArea(ta, {
+        mode: 'python', theme: 'material-darker', lineNumbers: true,
+        indentUnit: 4, tabSize: 4,
+      });
+      editor.setSize(null, 360);
+    } catch (e) { /* textarea remains */ }
+
+    function getCode() { return editor ? editor.getValue() : ta.value; }
+    function setCode(v) { editor ? editor.setValue(v) : (ta.value = v); }
+
+    const out = document.getElementById('out');
+    const statusEl = document.getElementById('status');
+    const runBtn = document.getElementById('runBtn');
+
+    function append(text, cls) {
+      const span = document.createElement('span');
+      if (cls) span.className = cls;
+      span.textContent = text;
+      out.appendChild(span);
+      out.scrollTop = out.scrollHeight;
+    }
+    function clearOut() { out.innerHTML = ''; }
+
+    document.querySelectorAll('.chip').forEach(c =>
+      c.addEventListener('click', () => setCode(EXAMPLES[c.getAttribute('data-ex')])));
+    document.getElementById('clearBtn').addEventListener('click', clearOut);
+
+    let pyodide = null;
+
+    async function initPython() {
+      pyodide = await loadPyodide();
+      pyodide.setStdout({ batched: (s) => append(s + "\n") });
+      pyodide.setStderr({ batched: (s) => append(s + "\n", 'err') });
+      await pyodide.loadPackage("micropip");
+      await pyodide.runPythonAsync(`
+import micropip
+await micropip.install("pyodide-http")
+await micropip.install("requests")
+import pyodide_http
+pyodide_http.patch_all()  # make 'requests' work in the browser
+`);
+      statusEl.textContent = 'Ready';
+      statusEl.className = 'pg-status ready';
+      runBtn.disabled = false;
+      clearOut();
+      append('Python ready. Press Run.\n', 'muted');
+    }
+
+    async function runCode() {
+      if (!pyodide) return;
+      runBtn.disabled = true;
+      statusEl.textContent = 'Running…';
+      statusEl.className = 'pg-status busy';
+      append('\n> running…\n', 'muted');
+      try {
+        pyodide.globals.set('BASE', BASE);
+        await pyodide.runPythonAsync(getCode());
+      } catch (e) {
+        append(String(e.message || e) + '\n', 'err');
+      } finally {
+        runBtn.disabled = false;
+        statusEl.textContent = 'Ready';
+        statusEl.className = 'pg-status ready';
+      }
+    }
+
+    runBtn.addEventListener('click', runCode);
+    initPython().catch(e => {
+      statusEl.textContent = 'Failed to load Python';
+      statusEl.className = 'pg-status';
+      append('Could not load the Python runtime: ' + (e.message || e) + '\n', 'err');
+    });
+  </script>
+</body>
+</html>

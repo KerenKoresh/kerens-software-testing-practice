@@ -50,7 +50,8 @@ There are no user accounts. Reading and searching are open to everyone; modifyin
 - **Database-agnostic**: runs on PostgreSQL in production and SQLite locally, selected automatically via `DATABASE_URL`.
 - **Self-healing schema**: detects and repairs schema drift on boot, with a concurrency-safe, multi-worker initialization lock.
 - **Scheduled cleanup**: a daily job removes API-created products to keep the database small.
-- **A dedicated guide page** (`/guide`) explaining the project and every endpoint.
+- **In-browser Python playground** (`/playground`): write and run Python against the live API using Pyodide (CPython in WebAssembly). The `requests` library is wired to call the site; nothing is executed on a server.
+- **A dedicated guide page** (`/guide`) explaining the project and every endpoint, with an interactive architecture diagram.
 - **One-command deploy** to Render via a Blueprint (`render.yaml`) that also provisions Postgres.
 
 ## Tech stack
@@ -215,7 +216,8 @@ toolshop/
 ├── templates/
 │   ├── index.html         # Catalog + search
 │   ├── product.html       # Product detail
-│   ├── guide.html         # Project & API guide
+│   ├── guide.html         # Project & API guide + architecture diagram
+│   ├── playground.html    # In-browser Python playground (Pyodide)
 │   └── docs.html          # Swagger UI
 ├── static/
 │   └── app.css            # Front-end styling
