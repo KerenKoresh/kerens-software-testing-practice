@@ -5,8 +5,7 @@ A small but complete full-stack demo store: a public web catalog backed by a ful
 **Live demo:** https://kerens-software-testing-practice.onrender.com
 **API docs (Swagger UI):** https://kerens-software-testing-practice.onrender.com/docs
 
-<!-- Replace OWNER/REPO with your GitHub path so the badge tracks your repo -->
-![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/KerenKoresh/kerens-software-testing-practice/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-CA2C2E)
