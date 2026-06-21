@@ -128,8 +128,11 @@
     }
 
     async function loadStat() {
-      try { const d = await (await fetch('/api/products')).json();
-        if (Array.isArray(d)) statCount.textContent = d.length; } catch(e){ statCount.textContent='··'; }
+      try {
+        const res = await fetch('/api/products');
+        const total = res.headers.get('X-Total-Count');
+        statCount.textContent = total !== null ? total : (await res.json()).length;
+      } catch(e){ statCount.textContent='··'; }
     }
 
     form.addEventListener('submit', e => { e.preventDefault(); loadProducts(input.value); });

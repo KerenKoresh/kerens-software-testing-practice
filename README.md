@@ -5,11 +5,14 @@ A small but complete full-stack demo store: a public web catalog backed by a ful
 **Live demo:** https://kerens-software-testing-practice.onrender.com
 **API docs (Swagger UI):** https://kerens-software-testing-practice.onrender.com/docs
 
+<!-- Replace OWNER/REPO with your GitHub path so the badge tracks your repo -->
+![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)
 ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-CA2C2E)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-ready-336791?logo=postgresql&logoColor=white)
 ![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-6BA539?logo=openapiinitiative&logoColor=white)
+![Tested with pytest](https://img.shields.io/badge/tested%20with-pytest-0A9EDC?logo=pytest&logoColor=white)
 
 ---
 
@@ -44,6 +47,8 @@ There are no user accounts. Reading and searching are open to everyone; modifyin
 ## Features
 
 - **Public REST API** with full CRUD over JSON and permissive CORS.
+- **Production-grade API surface**: pagination (`limit`/`offset` + `X-Total-Count`), sorting, filtering, rate limiting (`429` + `X-RateLimit-*`), ETags with conditional requests (`If-None-Match` -> `304`, `If-Match` -> `412` optimistic concurrency), per-request correlation IDs (`X-Request-ID`), and a consistent JSON error envelope.
+- **Tested + CI**: a `pytest` suite plus Schemathesis property-based contract tests, run on every push via GitHub Actions.
 - **Search** by partial, case-insensitive name (`?search=`) or exact ID (`?id=`).
 - **Interactive API docs**: a complete OpenAPI 3.0 spec rendered with Swagger UI, including "Try it out".
 - **Token-based ownership**: no logins; creating a product returns a one-time secret required to edit or delete it. Only a hash is stored.
@@ -110,6 +115,8 @@ Base URL: `/api`. All responses are JSON. Reads and creates are open; updates an
 | `PUT` / `PATCH` | `/api/products/{id}` | `X-Edit-Token` | Update a product |
 | `DELETE` | `/api/products/{id}` | `X-Edit-Token` | Delete a product |
 | `GET` | `/api/health` | none | Health check (reports the active DB engine) |
+
+The list endpoint also supports `category`, `in_stock`, `sort` (e.g. `-price`), `limit` (1-100) and `offset`, and returns an `X-Total-Count` header. `GET /api/products/{id}` returns an `ETag`; send it back as `If-None-Match` for a `304`, or as `If-Match` on writes for optimistic concurrency (`412` if stale). Every response carries an `X-Request-ID`, and the API is rate limited (`429` with `X-RateLimit-*` headers).
 
 ### Examples
 
@@ -221,12 +228,30 @@ toolshop/
 │   └── docs.html          # Swagger UI
 ├── static/
 │   └── app.css            # Front-end styling
+├── tests/
+│   ├── conftest.py        # Test fixtures (throwaway DB, client)
+│   ├── test_api.py        # End-to-end API tests
+│   └── test_contract.py   # Schemathesis OpenAPI contract tests
+├── .github/workflows/ci.yml  # GitHub Actions (runs the suite on every push)
 ├── requirements.txt
+├── requirements-dev.txt   # Test/CI dependencies
+├── pytest.ini
 ├── Procfile               # Process definition (Gunicorn)
 ├── Dockerfile             # Container build
 ├── render.yaml            # Render Blueprint (web service + Postgres + cron)
 └── README.md
 ```
+
+## Testing
+
+The suite uses a throwaway SQLite database, so no setup is needed:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+`tests/test_api.py` covers every endpoint and status code (200/201/304/400/401/403/404/412), the edit-token ownership rules, ETag/`If-Match` concurrency, pagination, sorting and filtering. `tests/test_contract.py` uses [Schemathesis](https://schemathesis.readthedocs.io) to generate requests from the OpenAPI document and assert that responses conform to the schema and never 500. GitHub Actions runs the whole suite on every push (see the CI badge above).
 
 ## Running locally
 

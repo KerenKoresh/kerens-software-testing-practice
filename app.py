@@ -9,12 +9,16 @@ is required to update or delete that specific product. Only its hash is stored.
 """
 import os
 import hmac
+import json
+import uuid
 import secrets
 import hashlib
 import contextlib
 
 from flask import Flask, request, jsonify, g, render_template
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from sqlalchemy import create_engine, Integer, String, Float, Boolean, Text, select, func, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker, Mapped, mapped_column
 
@@ -40,6 +44,18 @@ Base = declarative_base()
 
 app = Flask(__name__)
 CORS(app)  # public API: allow cross-origin calls from anywhere
+
+# Rate limiting. In-memory by default (per worker); use Redis for multi-instance prod.
+RATE_LIMIT = os.environ.get("RATE_LIMIT", "240 per minute")
+RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() != "false"
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[RATE_LIMIT],
+    headers_enabled=True,           # adds X-RateLimit-* headers
+    enabled=RATE_LIMIT_ENABLED,
+    storage_uri="memory://",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -178,31 +194,126 @@ def close_session(exception):
 
 
 # ---------------------------------------------------------------------------
+# Cross-cutting: request id, error envelope, rate-limit handler
+# ---------------------------------------------------------------------------
+@app.before_request
+def _assign_request_id():
+    # Honour a client-supplied id for correlation, otherwise generate one.
+    g.request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+
+
+@app.after_request
+def _finalize_response(response):
+    rid = g.get("request_id")
+    if rid:
+        response.headers["X-Request-ID"] = rid
+        # Enrich JSON error bodies with a consistent envelope.
+        if response.is_json:
+            body = response.get_json(silent=True)
+            if isinstance(body, dict) and "error" in body and "request_id" not in body:
+                body["request_id"] = rid
+                body["status"] = response.status_code
+                response.set_data(json.dumps(body))
+    return response
+
+
+@app.errorhandler(429)
+def _rate_limited(e):
+    return jsonify({"error": f"rate limit exceeded ({e.description})"}), 429
+
+
+@app.errorhandler(404)
+def _not_found(e):
+    # JSON for API paths, default behaviour elsewhere.
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "not found"}), 404
+    return e
+
+
+@app.errorhandler(405)
+def _method_not_allowed(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "method not allowed"}), 405
+    return e
+
+
+def product_etag(p):
+    """A strong-ish ETag derived from the product's current content."""
+    raw = f"{p.id}:{p.name}:{p.description}:{p.price}:{p.category}:{int(bool(p.in_stock))}"
+    return '"' + hashlib.md5(raw.encode("utf-8")).hexdigest() + '"'
+
+
+# ---------------------------------------------------------------------------
 # Product API
 # ---------------------------------------------------------------------------
+ALLOWED_SORT = {"id", "name", "price"}
+
+
 @app.route("/api/products", methods=["GET"])
 def list_products():
-    """List products. Optional query params:
-    - search: partial, case-insensitive match on name
-    - id: exact product id
+    """List products with optional search, filtering, sorting and pagination.
+
+    Query params: search, id, category, in_stock, sort (e.g. name or -price),
+    limit (1-100, default 50), offset (>=0). Adds an X-Total-Count header.
     """
     s = get_session()
-    exact_id = request.args.get("id")
-    search = request.args.get("search")
+    args = request.args
 
+    # Exact-id lookup keeps its simple, list-returning behaviour.
+    exact_id = args.get("id")
     if exact_id is not None:
         if not exact_id.isdigit():
             return jsonify({"error": "id must be a number"}), 400
         rows = s.scalars(select(Product).where(Product.id == int(exact_id))).all()
-    elif search:
-        # Order by id so results follow creation order (newest last), stable across edits.
-        rows = s.scalars(
-            select(Product).where(Product.name.ilike(f"%{search}%")).order_by(Product.id)
-        ).all()
-    else:
-        rows = s.scalars(select(Product).order_by(Product.id)).all()
+        resp = jsonify([p.to_dict() for p in rows])
+        resp.headers["X-Total-Count"] = str(len(rows))
+        return resp
 
-    return jsonify([p.to_dict() for p in rows])
+    # Filters
+    conds = []
+    if args.get("search"):
+        conds.append(Product.name.ilike(f"%{args['search']}%"))
+    if args.get("category"):
+        conds.append(func.lower(Product.category) == args["category"].lower())
+    in_stock = args.get("in_stock")
+    if in_stock is not None:
+        v = in_stock.lower()
+        if v not in ("true", "false"):
+            return jsonify({"error": "in_stock must be true or false"}), 400
+        conds.append(Product.in_stock.is_(v == "true"))
+
+    # Sorting
+    sort = args.get("sort", "id")
+    descending = sort.startswith("-")
+    field = sort[1:] if descending else sort
+    if field not in ALLOWED_SORT:
+        return jsonify({"error": f"invalid sort '{sort}'; allowed: id, name, price"}), 400
+    col = getattr(Product, field)
+
+    # Pagination
+    try:
+        limit = int(args.get("limit", 50))
+        offset = int(args.get("offset", 0))
+    except ValueError:
+        return jsonify({"error": "limit and offset must be integers"}), 400
+    if not (1 <= limit <= 100):
+        return jsonify({"error": "limit must be between 1 and 100"}), 400
+    if offset < 0:
+        return jsonify({"error": "offset must be >= 0"}), 400
+
+    base = select(Product)
+    count_q = select(func.count()).select_from(Product)
+    for c in conds:
+        base = base.where(c)
+        count_q = count_q.where(c)
+
+    total = s.scalar(count_q)
+    base = base.order_by(col.desc() if descending else col.asc()).limit(limit).offset(offset)
+    rows = s.scalars(base).all()
+
+    resp = jsonify([p.to_dict() for p in rows])
+    resp.headers["X-Total-Count"] = str(total)
+    return resp
 
 
 @app.route("/api/products/<int:product_id>", methods=["GET"])
@@ -211,7 +322,24 @@ def get_product(product_id):
     p = s.get(Product, product_id)
     if p is None:
         return jsonify({"error": f"Product {product_id} not found"}), 404
-    return jsonify(p.to_dict())
+
+    etag = product_etag(p)
+    if request.headers.get("If-None-Match") == etag:
+        resp = app.response_class(status=304)
+        resp.headers["ETag"] = etag
+        return resp
+    resp = jsonify(p.to_dict())
+    resp.headers["ETag"] = etag
+    return resp
+
+
+def _precondition_failed(p):
+    """Optimistic concurrency: if the client sent If-Match and it no longer matches,
+    the product changed underneath them. Returns a 412 response or None."""
+    if_match = request.headers.get("If-Match")
+    if if_match and if_match != product_etag(p):
+        return jsonify({"error": "If-Match precondition failed; the product was modified"}), 412
+    return None
 
 
 @app.route("/api/products", methods=["POST"])
@@ -260,6 +388,9 @@ def update_product(product_id):
     denied = _require_edit_token(p)
     if denied is not None:
         return denied
+    stale = _precondition_failed(p)
+    if stale is not None:
+        return stale
 
     data = request.get_json(silent=True) or {}
     p.name = data.get("name", p.name)
@@ -269,7 +400,9 @@ def update_product(product_id):
     if "in_stock" in data:
         p.in_stock = bool(data["in_stock"])
     s.commit()
-    return jsonify(p.to_dict())
+    resp = jsonify(p.to_dict())
+    resp.headers["ETag"] = product_etag(p)
+    return resp
 
 
 @app.route("/api/products/<int:product_id>", methods=["DELETE"])
@@ -282,6 +415,9 @@ def delete_product(product_id):
     denied = _require_edit_token(p)
     if denied is not None:
         return denied
+    stale = _precondition_failed(p)
+    if stale is not None:
+        return stale
 
     s.delete(p)
     s.commit()
@@ -379,11 +515,19 @@ EDIT_TOKEN_HEADER = {
     "description": "The secret token returned when this product was created.",
 }
 
+IF_MATCH_HEADER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": False,
+    "schema": {"type": "string"},
+    "description": "The product's ETag, for optimistic concurrency (412 if stale).",
+}
+
 OPENAPI = {
     "openapi": "3.0.3",
     "info": {
         "title": "ToolShop API",
-        "version": "3.0.0",
+        "version": "4.0.0",
         "description": "Public REST API for the ToolShop store. Anyone can read and create. "
         "Creating a product returns a one-time `edit_token`; send it as the `X-Edit-Token` "
         "header to update or delete that product. No user accounts.",
@@ -395,8 +539,8 @@ OPENAPI = {
             "get": {
                 "tags": ["Products"],
                 "summary": "List / search products",
-                "description": "All products. Use `search` for a partial (case-insensitive) "
-                "name match, or `id` for an exact id.",
+                "description": "Search, filter, sort and paginate. The response includes an "
+                "`X-Total-Count` header with the total number of matches.",
                 "parameters": [
                     {"name": "search", "in": "query", "required": False,
                      "schema": {"type": "string"}, "example": "plier",
@@ -404,6 +548,18 @@ OPENAPI = {
                     {"name": "id", "in": "query", "required": False,
                      "schema": {"type": "integer"}, "example": 3,
                      "description": "Exact product id (returns 0 or 1 items)."},
+                    {"name": "category", "in": "query", "required": False,
+                     "schema": {"type": "string"}, "example": "Pliers",
+                     "description": "Exact, case-insensitive category filter."},
+                    {"name": "in_stock", "in": "query", "required": False,
+                     "schema": {"type": "boolean"}, "description": "Filter by stock status."},
+                    {"name": "sort", "in": "query", "required": False,
+                     "schema": {"type": "string", "enum": ["id", "-id", "name", "-name", "price", "-price"]},
+                     "description": "Sort field; prefix with '-' for descending."},
+                    {"name": "limit", "in": "query", "required": False,
+                     "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
+                    {"name": "offset", "in": "query", "required": False,
+                     "schema": {"type": "integer", "minimum": 0, "default": 0}},
                 ],
                 "responses": {
                     "200": {"description": "A list of products",
@@ -432,15 +588,24 @@ OPENAPI = {
             ],
             "get": {
                 "tags": ["Products"], "summary": "Get one product",
+                "description": "Returns an `ETag` header. Send it back as `If-None-Match` "
+                "to get a `304 Not Modified` when unchanged.",
+                "parameters": [
+                    {"name": "If-None-Match", "in": "header", "required": False,
+                     "schema": {"type": "string"}, "description": "Conditional GET."},
+                ],
                 "responses": {
                     "200": {"description": "The product",
                             "content": {"application/json": {"schema": PRODUCT_SCHEMA}}},
+                    "304": {"description": "Not modified (ETag matched)"},
                     "404": {"description": "Not found"},
                 },
             },
             "put": {
                 "tags": ["Products"], "summary": "Update a product (needs edit token)",
-                "parameters": [EDIT_TOKEN_HEADER],
+                "description": "Optionally send `If-Match` with the product's ETag for "
+                "optimistic concurrency; a stale ETag yields `412`.",
+                "parameters": [EDIT_TOKEN_HEADER, IF_MATCH_HEADER],
                 "requestBody": {"required": True,
                                 "content": {"application/json": {"schema": PRODUCT_INPUT}}},
                 "responses": {
@@ -449,16 +614,18 @@ OPENAPI = {
                     "401": {"description": "Missing edit token"},
                     "403": {"description": "Wrong token / baseline item"},
                     "404": {"description": "Not found"},
+                    "412": {"description": "If-Match precondition failed"},
                 },
             },
             "delete": {
                 "tags": ["Products"], "summary": "Delete a product (needs edit token)",
-                "parameters": [EDIT_TOKEN_HEADER],
+                "parameters": [EDIT_TOKEN_HEADER, IF_MATCH_HEADER],
                 "responses": {
                     "200": {"description": "Deleted"},
                     "401": {"description": "Missing edit token"},
                     "403": {"description": "Wrong token / baseline item"},
                     "404": {"description": "Not found"},
+                    "412": {"description": "If-Match precondition failed"},
                 },
             },
         },
