@@ -9,18 +9,13 @@ is required to update or delete that specific product. Only its hash is stored.
 """
 import os
 import hmac
-import json
-import time
 import secrets
 import hashlib
-import datetime
 import contextlib
 
-from flask import Flask, request, jsonify, g, render_template, Response, stream_with_context
+from flask import Flask, request, jsonify, g, render_template
 from flask_cors import CORS
-from sqlalchemy import (
-    create_engine, Integer, String, Float, Boolean, Text, select, func, inspect, delete,
-)
+from sqlalchemy import create_engine, Integer, String, Float, Boolean, Text, select, func, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker, Mapped, mapped_column
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -72,26 +67,6 @@ class Product(Base):
             "in_stock": bool(self.in_stock),
             "editable": self.edit_token_hash is not None,
         }
-
-
-class RequestLog(Base):
-    """Recent API requests, shown live on the /live page."""
-    __tablename__ = "request_log"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    ts: Mapped[str] = mapped_column(String(32), nullable=False)
-    method: Mapped[str] = mapped_column(String(10), nullable=False)
-    path: Mapped[str] = mapped_column(String(200), nullable=False)
-    status: Mapped[int] = mapped_column(Integer, nullable=False)
-
-    def to_dict(self):
-        return {"id": self.id, "ts": self.ts, "method": self.method,
-                "path": self.path, "status": self.status}
-
-
-# API paths that should NOT be recorded in the live feed (to avoid noise/feedback).
-FEED_SKIP_PATHS = {"/api/stream", "/api/requests", "/api/openapi.json", "/api/health"}
-FEED_KEEP = 500  # how many recent log rows to retain
 
 
 # Baseline catalog (no edit token -> visible to all, editable by no one).
@@ -200,74 +175,6 @@ def close_session(exception):
     s = g.pop("session", None)
     if s is not None:
         s.close()
-
-
-# ---------------------------------------------------------------------------
-# Live request feed
-# ---------------------------------------------------------------------------
-@app.after_request
-def _record_request(response):
-    """Record API calls so they can be streamed to the live feed."""
-    path = request.path
-    if path.startswith("/api/") and path not in FEED_SKIP_PATHS:
-        try:
-            with SessionLocal() as s:
-                s.add(RequestLog(
-                    ts=datetime.datetime.utcnow().isoformat(),
-                    method=request.method, path=path, status=response.status_code,
-                ))
-                s.commit()
-                max_id = s.scalar(select(func.max(RequestLog.id))) or 0
-                if max_id % 25 == 0 and max_id > FEED_KEEP:
-                    s.execute(delete(RequestLog).where(RequestLog.id < max_id - FEED_KEEP))
-                    s.commit()
-        except Exception:
-            pass  # logging must never break a response
-    return response
-
-
-@app.route("/api/requests")
-def recent_requests():
-    """The most recent API calls (newest last), for the live feed's initial fill."""
-    with SessionLocal() as s:
-        rows = s.scalars(
-            select(RequestLog).order_by(RequestLog.id.desc()).limit(40)
-        ).all()
-    return jsonify([r.to_dict() for r in reversed(rows)])
-
-
-@app.route("/api/stream")
-def stream():
-    """Server-Sent Events stream of new API requests."""
-    try:
-        last = int(request.headers.get("Last-Event-ID", 0))
-    except (TypeError, ValueError):
-        last = 0
-
-    def gen(last_id):
-        if last_id == 0:
-            with SessionLocal() as s:
-                last_id = s.scalar(select(func.max(RequestLog.id))) or 0
-        start = time.time()
-        yield ": connected\n\n"
-        while time.time() - start < 120:  # bounded; EventSource auto-reconnects
-            with SessionLocal() as s:
-                rows = s.scalars(
-                    select(RequestLog).where(RequestLog.id > last_id).order_by(RequestLog.id)
-                ).all()
-                events = [r.to_dict() for r in rows]
-            for ev in events:
-                last_id = ev["id"]
-                yield f"id: {ev['id']}\ndata: {json.dumps(ev)}\n\n"
-            yield ": ping\n\n"
-            time.sleep(1.5)
-
-    return Response(
-        stream_with_context(gen(last)),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-                 "Connection": "keep-alive"},
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -424,11 +331,6 @@ def guide_page():
 @app.route("/playground")
 def playground_page():
     return render_template("playground.html")
-
-
-@app.route("/live")
-def live_page():
-    return render_template("live.html")
 
 
 @app.route("/docs")

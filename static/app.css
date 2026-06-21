@@ -272,28 +272,3 @@ a { color: inherit; text-decoration: none; }
 .pg-status.ready { color: var(--in); }
 .pg-status.busy { color: var(--accent); }
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
-
-/* ---------- Live request feed ---------- */
-.live-head { display: flex; align-items: center; gap: 10px; margin: 16px 0 14px; }
-.live-dot { width: 11px; height: 11px; border-radius: 50%; background: #1f9d55; position: relative; }
-.live-dot::after { content: ""; position: absolute; inset: -5px; border-radius: 50%;
-  background: rgba(31,157,85,.35); animation: livepulse 1.6s ease-out infinite; }
-@keyframes livepulse { 0% { transform: scale(.6); opacity: .8; } 100% { transform: scale(1.8); opacity: 0; } }
-.live-label { font-weight: 800; letter-spacing: 1px; text-transform: uppercase; font-size: 13px; }
-.live-status { color: var(--muted); font-size: 13px; margin-left: auto; }
-
-.feed { background: #1c1c1c; border-radius: 16px; padding: 8px; max-height: 560px; overflow: auto;
-  box-shadow: 0 8px 24px rgba(0,0,0,.06); }
-.feed-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 10px;
-  font-family: ui-monospace, Menlo, monospace; font-size: 13.5px; }
-.feed-row:nth-child(odd) { background: rgba(255,255,255,.03); }
-.feed-row.new { animation: flashin .8s ease; }
-@keyframes flashin { from { background: rgba(242,105,30,.22); } to { background: transparent; } }
-.feed .m { font-weight: 800; font-size: 11px; padding: 4px 9px; border-radius: 7px; color: #fff; min-width: 54px; text-align: center; }
-.feed .m.get { background: #1f9d55; } .feed .m.post { background: #2f7bd6; }
-.feed .m.put { background: #d98a1f; } .feed .m.patch { background: #b06a1a; } .feed .m.del { background: #d64545; }
-.feed .p { color: #e8e8e8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.feed .s { font-weight: 800; }
-.feed .s.s2 { color: #5fd36b; } .feed .s.s4 { color: #ffb454; } .feed .s.s5 { color: #ff7a7a; }
-.feed .t { color: #8a8a8a; font-size: 12px; min-width: 64px; text-align: right; }
-.feed-empty { color: #8a8a8a; padding: 28px; text-align: center; font-family: inherit; }
