@@ -1,3 +1,7 @@
+databases:
+  - name: toolshop-db
+    plan: free          # free Postgres instance
+
 services:
   - type: web
     name: toolshop
@@ -8,5 +12,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.4"
-      - key: SECRET_KEY
-        generateValue: true   # stable per-service secret for signing JWTs
+      - key: DATABASE_URL          # injected from the Postgres instance above
+        fromDatabase:
+          name: toolshop-db
+          property: connectionString

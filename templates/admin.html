@@ -12,15 +12,15 @@
     <nav class="menu">
       <a class="admin-link" href="/docs">API Docs</a>
       <a class="admin-link" href="/">← Back to shop</a>
-      <span class="userbar" id="userbar"></span>
     </nav>
   </header>
 
   <div class="container">
     <div id="toast" class="message toast hidden"></div>
+    <p class="muted">When you create a product you become its owner (an edit token is saved
+      in this browser). Only the owner can edit or delete it.</p>
 
     <div class="admin-grid">
-      <!-- Form panel -->
       <div class="panel">
         <h2 id="formTitle">Add product</h2>
         <form id="productForm">
@@ -50,7 +50,6 @@
         </form>
       </div>
 
-      <!-- Table panel -->
       <div class="panel">
         <h2>All products</h2>
         <table class="admin-table">
@@ -63,11 +62,8 @@
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='auth.js') }}"></script>
+  <script src="{{ url_for('static', filename='products.js') }}"></script>
   <script>
-    if (!requireAuth()) throw new Error('redirecting');
-    renderUserBar(document.getElementById('userbar'));
-
     const form = document.getElementById('productForm');
     const tbody = document.getElementById('tbody');
     const toast = document.getElementById('toast');
@@ -84,12 +80,6 @@
       in_stock: document.getElementById('in_stock'),
     };
 
-    function escapeHtml(str) {
-      return String(str).replace(/[&<>"']/g, c => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-      }[c]));
-    }
-
     function showToast(text, type) {
       toast.textContent = text;
       toast.className = 'message toast ' + type;
@@ -97,20 +87,24 @@
     }
 
     async function loadTable() {
-      const res = await authFetch('/api/products');
+      const res = await fetch('/api/products');
       const data = await res.json();
       tbody.innerHTML = '';
       data.forEach(p => {
+        const mine = ownsProduct(p.id);
+        const actions = mine
+          ? `<div class="row-actions">
+               <button class="btn btn-ghost btn-sm" data-edit="${p.id}">Edit</button>
+               <button class="btn btn-danger btn-sm" data-del="${p.id}">Delete</button>
+             </div>`
+          : `<span class="muted" title="Created by someone else">🔒</span>`;
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td>${p.id}</td>
-          <td>${escapeHtml(p.name)}</td>
+          <td>${escapeHtml(p.name)}${mine ? ' <span class="badge">yours</span>' : ''}</td>
           <td>$${Number(p.price).toFixed(2)}</td>
           <td class="${p.in_stock ? 'in' : 'out'}">${p.in_stock ? 'Yes' : 'No'}</td>
-          <td><div class="row-actions">
-            <button class="btn btn-ghost btn-sm" data-edit="${p.id}">Edit</button>
-            <button class="btn btn-danger btn-sm" data-del="${p.id}">Delete</button>
-          </div></td>`;
+          <td>${actions}</td>`;
         tbody.appendChild(tr);
       });
     }
@@ -137,7 +131,7 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    // Create or update
+    // Create (POST) or update (PUT)
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const payload = {
@@ -148,33 +142,43 @@
         in_stock: f.in_stock.checked,
       };
       const id = f.id.value;
-      const url = id ? '/api/products/' + id : '/api/products';
-      const method = id ? 'PUT' : 'POST';
 
-      const res = await authFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showToast(data.error || 'Error saving product', 'error');
-        return;
+      try {
+        let res, data;
+        if (id) {
+          res = await fetch('/api/products/' + id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'X-Edit-Token': getToken(id) || '' },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          res = await fetch('/api/products', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        }
+        data = await res.json();
+        if (!res.ok) { showToast(data.error || 'Error saving product', 'error'); return; }
+
+        if (!id && data.edit_token) saveToken(data.id, data.edit_token); // become owner
+        showToast(id ? 'Product updated.' : 'Product created — you are the owner.', 'info');
+        resetForm();
+        loadTable();
+      } catch (err) {
+        showToast('Network error. Please try again.', 'error');
       }
-      showToast(id ? 'Product updated.' : 'Product created.', 'info');
-      resetForm();
-      loadTable();
     });
 
     cancelBtn.addEventListener('click', resetForm);
 
-    // Edit / delete buttons (event delegation)
+    // Edit / delete (only rendered for owned products)
     tbody.addEventListener('click', async e => {
       const editId = e.target.getAttribute('data-edit');
       const delId = e.target.getAttribute('data-del');
 
       if (editId) {
-        const res = await authFetch('/api/products/' + editId);
+        const res = await fetch('/api/products/' + editId);
         const data = await res.json();
         if (res.ok) fillForm(data);
         else showToast(data.error || 'Not found', 'error');
@@ -182,9 +186,13 @@
 
       if (delId) {
         if (!confirm('Delete product #' + delId + '?')) return;
-        const res = await authFetch('/api/products/' + delId, { method: 'DELETE' });
+        const res = await fetch('/api/products/' + delId, {
+          method: 'DELETE',
+          headers: { 'X-Edit-Token': getToken(delId) || '' },
+        });
         const data = await res.json();
         if (!res.ok) { showToast(data.error || 'Error deleting', 'error'); return; }
+        removeToken(delId);
         showToast('Product deleted.', 'info');
         if (f.id.value === delId) resetForm();
         loadTable();

@@ -4,42 +4,24 @@
 
 ## מה יש כאן
 
-- **Backend**: Flask + SQLite (CRUD מלא + חיפוש)
-- **אימות JWT**: הרשמה / כניסה; כל משתמש רואה ומנהל **רק את המוצרים שלו** (פרטי לחלוטין)
+- **Backend**: Flask + SQLAlchemy — Postgres בענן (`DATABASE_URL`), SQLite מקומית כברירת מחדל
+- **בלי משתמשים**: הקטלוג ציבורי לצפייה. עריכה/מחיקה מוגבלת לבעל ה-**edit-token** של הפריט
 - **Frontend**: דף בית עם תיבת חיפוש; לחיצה על מוצר פותחת טאב חדש עם הפרטים; הודעת שגיאה כשאין תוצאה
-- **דף ניהול** (`/admin`): טופס להוספה / עריכה / מחיקה של מוצרים דרך הממשק
-- **דף תיעוד Swagger** (`/docs`): תיעוד אינטראקטיבי + כפתור Authorize ל-JWT
+- **דף ניהול** (`/admin`): הוספה / עריכה / מחיקה. עריכה ומחיקה מופיעות רק על פריטים שיצרת
+- **דף תיעוד Swagger** (`/docs`): תיעוד אינטראקטיבי עם "Try it out"
 - **CORS פתוח** — ה-API נגיש מכל מקור
 
-## אימות (JWT)
+## איך עובדת הבעלות (edit-token)
 
-נרשמים או מתחברים, מקבלים `token`, ושולחים אותו בכל בקשה למוצרים:
-`Authorization: Bearer <token>`
+אין הרשמה ואין login. כשיוצרים מוצר, ה-API מחזיר **פעם אחת** שדה `edit_token` (מחרוזת סודית). רק ה-hash שלו נשמר ב-DB. כדי לעדכן או למחוק את המוצר חייבים לשלוח את ה-token ב-header:
+`X-Edit-Token: <token>`
 
-| Method | Endpoint | תיאור |
-|--------|----------|-------|
-| POST | `/api/register` | יצירת משתמש חדש (מחזיר token) |
-| POST | `/api/login` | כניסה (מחזיר token) |
-| GET | `/api/me` | פרטי המשתמש המחובר |
-
-```bash
-# הרשמה
-curl -X POST http://localhost:5000/api/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"me@example.com","password":"secret1"}'
-
-# שימוש ב-token שהתקבל
-TOKEN=...   # מתוך התשובה
-curl http://localhost:5000/api/products -H "Authorization: Bearer $TOKEN"
-```
-
-> ⚠️ בפריסה חובה להגדיר `SECRET_KEY` כ-env var קבוע (חתימת ה-JWT). אחרת כל deploy מנתק את כולם.
+באתר זה קורה אוטומטית — הדפדפן שומר את ה-tokens של מה שיצרת ב-`localStorage`, אז כפתורי Edit/Delete מופיעים רק על הפריטים שלך. מוצרי הקטלוג הבסיסי (seed) אינם ניתנים לעריכה (אין להם token).
 
 ## עמודי האתר
 
 | עמוד | כתובת |
 |------|-------|
-| כניסה / הרשמה | `/login` |
 | חנות + חיפוש | `/` |
 | פרטי מוצר | `/product/<id>` |
 | ניהול מוצרים | `/admin` |
@@ -54,36 +36,39 @@ python app.py
 # פתחי http://localhost:5000
 ```
 
-## API (מוצרים)
+## API
 
-בסיס: `/api` — **כל ה-endpoints של המוצרים דורשים `Authorization: Bearer <token>`** ופועלים רק על המוצרים של המשתמש המחובר.
+בסיס: `/api` — קריאה ויצירה פתוחות לכולם. עדכון ומחיקה דורשים `X-Edit-Token`.
 
-| Method | Endpoint | תיאור |
-|--------|----------|-------|
-| GET | `/api/products` | כל המוצרים |
-| GET | `/api/products?search=plier` | חיפוש לפי שם חלקי (case-insensitive) |
-| GET | `/api/products?id=3` | מוצר לפי ID מדויק (רשימה) |
-| GET | `/api/products/3` | מוצר בודד לפי ID |
-| POST | `/api/products` | יצירת מוצר |
-| PUT/PATCH | `/api/products/3` | עדכון מוצר |
-| DELETE | `/api/products/3` | מחיקת מוצר |
-| GET | `/api/health` | בדיקת בריאות |
+| Method | Endpoint | Auth | תיאור |
+|--------|----------|------|-------|
+| GET | `/api/products` | — | כל המוצרים |
+| GET | `/api/products?search=plier` | — | חיפוש לפי שם חלקי (case-insensitive) |
+| GET | `/api/products?id=3` | — | מוצר לפי ID מדויק (רשימה) |
+| GET | `/api/products/3` | — | מוצר בודד לפי ID |
+| POST | `/api/products` | — | יצירת מוצר (מחזיר `edit_token`) |
+| PUT/PATCH | `/api/products/3` | `X-Edit-Token` | עדכון מוצר |
+| DELETE | `/api/products/3` | `X-Edit-Token` | מחיקת מוצר |
+| GET | `/api/health` | — | בדיקת בריאות |
 
 ### דוגמאות
 
 ```bash
-# יצירה
+# יצירה — שמרי את ה-edit_token מהתשובה
 curl -X POST http://localhost:5000/api/products \
   -H "Content-Type: application/json" \
-  -d '{"name":"Rubber Mallet","price":9.9,"category":"Hammer","description":"Soft mallet"}'
+  -d '{"name":"Rubber Mallet","price":9.9,"category":"Hammer"}'
+# -> {"id": 13, ..., "edit_token": "AbC123..."}
 
-# עדכון
-curl -X PUT http://localhost:5000/api/products/1 \
+# עדכון (עם ה-token)
+curl -X PUT http://localhost:5000/api/products/13 \
   -H "Content-Type: application/json" \
+  -H "X-Edit-Token: AbC123..." \
   -d '{"price":19.99,"in_stock":false}'
 
-# מחיקה
-curl -X DELETE http://localhost:5000/api/products/1
+# מחיקה (עם ה-token)
+curl -X DELETE http://localhost:5000/api/products/13 \
+  -H "X-Edit-Token: AbC123..."
 
 # חיפוש לפי שם חלקי
 curl "http://localhost:5000/api/products?search=plier"
@@ -100,7 +85,8 @@ curl "http://localhost:5000/api/products?id=3"
   "description": "...",
   "price": 14.15,
   "category": "Pliers",
-  "in_stock": true
+  "in_stock": true,
+  "editable": false
 }
 ```
 
@@ -108,14 +94,16 @@ curl "http://localhost:5000/api/products?id=3"
 
 האתר מוכן לפריסה. שתי אופציות חינמיות מומלצות:
 
-### אפשרות א' — Render (הכי פשוט)
+### אפשרות א' — Render עם Postgres (מומלץ, נתונים נשמרים)
+
+הקובץ `render.yaml` כבר מגדיר גם **Postgres** וגם את ה-Web Service, ומחבר ביניהם אוטומטית דרך `DATABASE_URL`.
 
 1. העלי את התיקייה ל-GitHub repo.
-2. היכנסי ל-[render.com](https://render.com) → New → Web Service → חברי את ה-repo.
-3. Render יזהה את `render.yaml` אוטומטית. אם לא:
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn app:app --bind 0.0.0.0:$PORT`
-4. Deploy. תקבלי כתובת ציבורית כמו `https://toolshop.onrender.com`.
+2. ב-[render.com](https://render.com) → **New → Blueprint** → חברי את ה-repo.
+3. Render יקרא את `render.yaml`, ייצור את ה-Postgres ואת השירות, ויזריק את `DATABASE_URL`.
+4. Deploy. תקבלי כתובת ציבורית כמו `https://toolshop.onrender.com`. הנתונים נשמרים בין deploys.
+
+> בלי `DATABASE_URL` האפליקציה נופלת חזרה ל-SQLite מקומי (טוב לפיתוח). אפשר לראות איזה DB פעיל ב-`/api/health`.
 
 ### אפשרות ב' — Railway
 
@@ -130,5 +118,5 @@ docker build -t toolshop .
 docker run -p 8080:8080 toolshop
 ```
 
-> הערה: ב-Render בתוכנית החינמית מערכת הקבצים זמנית, כך שה-SQLite מתאפס בכל deploy.
-> לדמו זה מצוין. לנתונים קבועים — חברי Postgres או דיסק קבוע (paid).
+> הערה: עם Postgres הנתונים נשמרים בין deploys (בניגוד ל-SQLite על דיסק זמני).
+> ה-Postgres החינמי של Render מוגבל בזמן — שדרגי לתוכנית בתשלום לשימוש ארוך טווח.

@@ -12,7 +12,6 @@
     <nav class="menu">
       <a class="admin-link" href="/docs">API Docs</a>
       <a class="admin-link" href="/admin">Manage products</a>
-      <span class="userbar" id="userbar"></span>
     </nav>
   </header>
 
@@ -26,11 +25,8 @@
     <div id="grid" class="grid"></div>
   </div>
 
-  <script src="{{ url_for('static', filename='auth.js') }}"></script>
+  <script src="{{ url_for('static', filename='products.js') }}"></script>
   <script>
-    if (!requireAuth()) throw new Error('redirecting');
-    renderUserBar(document.getElementById('userbar'));
-
     const grid = document.getElementById('grid');
     const messageBox = document.getElementById('message');
     const form = document.getElementById('searchForm');
@@ -40,26 +36,23 @@
       messageBox.textContent = text;
       messageBox.className = 'message ' + type;
     }
-    function hideMessage() {
-      messageBox.className = 'message hidden';
-    }
+    function hideMessage() { messageBox.className = 'message hidden'; }
 
     function renderProducts(products) {
       grid.innerHTML = '';
       products.forEach(p => {
+        const mine = ownsProduct(p.id);
         const card = document.createElement('div');
         card.className = 'card';
         card.innerHTML = `
-          <h3>${escapeHtml(p.name)}</h3>
+          <h3>${escapeHtml(p.name)}${mine ? ' <span class="badge">yours</span>' : ''}</h3>
           <div class="price">$${Number(p.price).toFixed(2)}</div>
           <div class="cat">${escapeHtml(p.category || 'Uncategorized')}</div>
           <div class="stock ${p.in_stock ? 'in' : 'out'}">
             ${p.in_stock ? 'In stock' : 'Out of stock'}
           </div>`;
         // Click opens the product details in a NEW TAB
-        card.addEventListener('click', () => {
-          window.open('/product/' + p.id, '_blank');
-        });
+        card.addEventListener('click', () => window.open('/product/' + p.id, '_blank'));
         grid.appendChild(card);
       });
     }
@@ -68,24 +61,15 @@
       hideMessage();
       grid.innerHTML = '';
       let url = '/api/products';
-
       if (query) {
-        // If the query is purely digits -> search by exact ID, else partial name
-        if (/^\d+$/.test(query.trim())) {
-          url += '?id=' + encodeURIComponent(query.trim());
-        } else {
-          url += '?search=' + encodeURIComponent(query.trim());
-        }
+        // Purely digits -> search by exact ID, else partial name
+        if (/^\d+$/.test(query.trim())) url += '?id=' + encodeURIComponent(query.trim());
+        else url += '?search=' + encodeURIComponent(query.trim());
       }
-
       try {
-        const res = await authFetch(url);
+        const res = await fetch(url);
         const data = await res.json();
-
-        if (!res.ok) {
-          showMessage(data.error || 'Something went wrong.', 'error');
-          return;
-        }
+        if (!res.ok) { showMessage(data.error || 'Something went wrong.', 'error'); return; }
         if (!Array.isArray(data) || data.length === 0) {
           showMessage('No products found for "' + query + '". Try a different search.', 'error');
           return;
@@ -96,18 +80,7 @@
       }
     }
 
-    function escapeHtml(str) {
-      return String(str).replace(/[&<>"']/g, c => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-      }[c]));
-    }
-
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      loadProducts(input.value);
-    });
-
-    // Load all products on first visit
+    form.addEventListener('submit', e => { e.preventDefault(); loadProducts(input.value); });
     loadProducts('');
   </script>
 </body>

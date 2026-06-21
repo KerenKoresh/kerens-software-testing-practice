@@ -9,7 +9,6 @@
 <body>
   <header class="bar">
     <h1><a href="/">🛠️ ToolShop</a></h1>
-    <span class="userbar" id="userbar"></span>
   </header>
 
   <div class="container">
@@ -17,36 +16,26 @@
     <div id="content"></div>
   </div>
 
-  <script src="{{ url_for('static', filename='auth.js') }}"></script>
+  <script src="{{ url_for('static', filename='products.js') }}"></script>
   <script>
-    if (!requireAuth()) throw new Error('redirecting');
-    renderUserBar(document.getElementById('userbar'));
-
     const productId = {{ product_id }};
     const content = document.getElementById('content');
 
-    function escapeHtml(str) {
-      return String(str).replace(/[&<>"']/g, c => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-      }[c]));
-    }
-
     async function loadProduct() {
       try {
-        const res = await authFetch('/api/products/' + productId);
+        const res = await fetch('/api/products/' + productId);
         const data = await res.json();
-
         if (!res.ok) {
           content.innerHTML =
             '<div class="message error">' + escapeHtml(data.error || 'Product not found') + '</div>';
           document.title = 'Not found · ToolShop';
           return;
         }
-
         document.title = data.name + ' · ToolShop';
+        const mine = ownsProduct(data.id);
         content.innerHTML = `
           <div class="detail">
-            <h2>${escapeHtml(data.name)}</h2>
+            <h2>${escapeHtml(data.name)}${mine ? ' <span class="badge">yours</span>' : ''}</h2>
             <div class="price">$${Number(data.price).toFixed(2)}</div>
             <p class="muted">${escapeHtml(data.description || 'No description.')}</p>
             <dl>
@@ -57,12 +46,12 @@
                 ${data.in_stock ? 'In stock' : 'Out of stock'}
               </dd>
             </dl>
+            ${mine ? '<p><a class="btn btn-ghost btn-sm" href="/admin">Edit in Manage products →</a></p>' : ''}
           </div>`;
       } catch (e) {
         content.innerHTML = '<div class="message error">Network error. Please try again.</div>';
       }
     }
-
     loadProduct();
   </script>
 </body>
