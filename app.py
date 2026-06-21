@@ -8,6 +8,7 @@ returns a one-time secret `edit_token`; that token (sent as the `X-Edit-Token` h
 is required to update or delete that specific product. Only its hash is stored.
 """
 import os
+import hmac
 import secrets
 import hashlib
 import contextlib
@@ -24,6 +25,9 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///" + os.path.join(BASE_D
 # Render exposes the legacy "postgres://" scheme; SQLAlchemy needs "postgresql://".
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+# Secret for the maintenance cleanup endpoint. If unset, the endpoint stays disabled.
+CLEANUP_TOKEN = os.environ.get("CLEANUP_TOKEN", "")
 
 # SQLite needs a special flag for multi-threaded gunicorn workers.
 engine_kwargs = {"pool_pre_ping": True}
@@ -286,6 +290,23 @@ def delete_product(product_id):
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok", "db": engine.dialect.name})
+
+
+@app.route("/api/maintenance/cleanup", methods=["POST", "GET"])
+def maintenance_cleanup():
+    """Delete API-created products, keeping the baseline catalog.
+
+    Protected by a shared secret so an external scheduler (e.g. cron-job.org) can
+    trigger the daily cleanup. Disabled unless the CLEANUP_TOKEN env var is set.
+    Token may be passed as the `X-Cleanup-Token` header or a `?token=` query param.
+    """
+    if not CLEANUP_TOKEN:
+        return jsonify({"error": "cleanup endpoint disabled (CLEANUP_TOKEN not set)"}), 503
+    provided = request.headers.get("X-Cleanup-Token") or request.args.get("token", "")
+    if not hmac.compare_digest(provided, CLEANUP_TOKEN):
+        return jsonify({"error": "unauthorized"}), 401
+    removed = delete_user_products()
+    return jsonify({"message": "cleanup done", "removed": removed})
 
 
 # ---------------------------------------------------------------------------

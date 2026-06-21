@@ -168,11 +168,24 @@ JSON representation:
 
 ## Data retention
 
-Products created through the API are temporary. A scheduled job (`scripts/cleanup.py`) runs once a day at midnight (Israel time) and deletes every product that was created via the API, keeping only the built-in baseline catalog. This keeps the database small. On Render the job is configured as a Cron Job in `render.yaml`; the schedule is in UTC (`0 21 * * *` is midnight in Israel during summer time). You can also run it manually:
+Products created through the API are temporary. A scheduled job deletes every product that was created via the API once a day at midnight (Israel time), keeping only the built-in baseline catalog. This keeps the database small.
+
+There are two ways to schedule it:
+
+**Option A: Render Cron Job** (configured in `render.yaml`). Runs `scripts/cleanup.py` on a schedule in UTC (`0 21 * * *` is midnight in Israel during summer time). You can also run the script manually:
 
 ```bash
 python scripts/cleanup.py
 ```
+
+**Option B: external scheduler** (free, no Render cron required). The app exposes a secret-protected endpoint that runs the same cleanup:
+
+```
+POST /api/maintenance/cleanup     # header: X-Cleanup-Token: <secret>
+GET  /api/maintenance/cleanup?token=<secret>
+```
+
+Set a `CLEANUP_TOKEN` environment variable on the web service to a random secret (the endpoint returns `503` until it is set). Then point a free scheduler such as [cron-job.org](https://cron-job.org) at the URL once a day, passing the token. The endpoint is intentionally excluded from the public OpenAPI docs.
 
 ## Project structure
 
