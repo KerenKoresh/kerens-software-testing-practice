@@ -238,11 +238,6 @@ def product_page(product_id):
     return render_template("product.html", product_id=product_id)
 
 
-@app.route("/admin")
-def admin_page():
-    return render_template("admin.html")
-
-
 @app.route("/docs")
 def docs_page():
     return render_template("docs.html")
