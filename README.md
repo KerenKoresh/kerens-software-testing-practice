@@ -51,6 +51,7 @@ There are no user accounts. Reading and searching are open to everyone; modifyin
 - **Self-healing schema**: detects and repairs schema drift on boot, with a concurrency-safe, multi-worker initialization lock.
 - **Scheduled cleanup**: a daily job removes API-created products to keep the database small.
 - **In-browser Python playground** (`/playground`): write and run Python against the live API using Pyodide (CPython in WebAssembly). The `requests` library is wired to call the site; nothing is executed on a server.
+- **Live request feed** (`/live`): a real-time stream of incoming API calls (method, path, status) over Server-Sent Events, backed by a short rolling log in the database.
 - **A dedicated guide page** (`/guide`) explaining the project and every endpoint, with an interactive architecture diagram.
 - **One-command deploy** to Render via a Blueprint (`render.yaml`) that also provisions Postgres.
 
@@ -218,6 +219,7 @@ toolshop/
 │   ├── product.html       # Product detail
 │   ├── guide.html         # Project & API guide + architecture diagram
 │   ├── playground.html    # In-browser Python playground (Pyodide)
+│   ├── live.html          # Live request feed (SSE)
 │   └── docs.html          # Swagger UI
 ├── static/
 │   └── app.css            # Front-end styling

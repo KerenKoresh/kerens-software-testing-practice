@@ -9,7 +9,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     # Ensure the schema/seed once (before workers spawn), then serve.
-    startCommand: python scripts/migrate.py && gunicorn app:app --bind 0.0.0.0:$PORT
+    startCommand: python scripts/migrate.py && gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 8
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.4"

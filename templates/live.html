@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live · ToolShop</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}" />
+</head>
+<body>
+  <div class="shell">
+
+    <header class="topbar">
+      <div class="brand"><span class="logo"></span> ToolShop</div>
+      <nav class="nav">
+        <a href="/">Home</a>
+        <a href="/guide">Guide</a>
+        <a href="/playground">Playground</a>
+        <a href="/live" class="active">Live</a>
+        <a href="/docs">API Docs</a>
+      </nav>
+      <a class="btn-dark" href="/docs">Public API</a>
+    </header>
+
+    <section class="hero" style="padding-bottom:6px;">
+      <div class="hero-tag">[ LIVE FEED ]</div>
+      <h1>The API, in real time</h1>
+      <p class="lead" style="max-width:760px;">Every call to the public API shows up here the moment it
+        happens, streamed live over Server-Sent Events. Open the
+        <a href="/playground">Playground</a>, run an example, or hit the
+        <a href="/docs">API docs</a> in another tab, then watch the requests roll in.</p>
+    </section>
+
+    <div class="live-head">
+      <span class="live-dot" id="dot"></span>
+      <span class="live-label">Live requests</span>
+      <span class="live-status" id="status">connecting…</span>
+    </div>
+
+    <div class="feed" id="feed">
+      <div class="feed-empty" id="empty">Waiting for requests… try the Playground or API docs.</div>
+    </div>
+
+    <footer class="foot">
+      <span>&copy; 2026 Keren Koresh · ToolShop</span>
+      <span>Server-Sent Events · last 40 requests</span>
+    </footer>
+
+  </div>
+
+  <script>
+    const feed = document.getElementById('feed');
+    const empty = document.getElementById('empty');
+    const statusEl = document.getElementById('status');
+    const dot = document.getElementById('dot');
+    const MAX_ROWS = 60;
+
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    function methodCls(m){ return ({GET:'get',POST:'post',PUT:'put',PATCH:'patch',DELETE:'del'})[m] || 'get'; }
+    function statusCls(s){ return s>=500?'s5':(s>=400?'s4':'s2'); }
+    function timeOf(iso){
+      const d = new Date(iso + 'Z');
+      return isNaN(d) ? '' : d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    }
+
+    function addRow(ev, isNew) {
+      if (empty) { empty.remove(); }
+      const row = document.createElement('div');
+      row.className = 'feed-row' + (isNew ? ' new' : '');
+      row.innerHTML = `
+        <span class="m ${methodCls(ev.method)}">${ev.method}</span>
+        <span class="p">${escapeHtml(ev.path)}</span>
+        <span class="s ${statusCls(ev.status)}">${ev.status}</span>
+        <span class="t">${timeOf(ev.ts)}</span>`;
+      feed.insertBefore(row, feed.firstChild);
+      while (feed.children.length > MAX_ROWS) feed.removeChild(feed.lastChild);
+    }
+
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/requests');
+        const rows = await res.json();
+        rows.forEach(ev => addRow(ev, false)); // oldest first -> newest ends on top
+      } catch (e) { /* ignore */ }
+    }
+
+    function connect() {
+      const es = new EventSource('/api/stream');
+      es.onopen = () => { statusEl.textContent = 'live'; dot.style.background = '#1f9d55'; };
+      es.onmessage = (e) => {
+        try { addRow(JSON.parse(e.data), true); } catch (err) {}
+      };
+      es.onerror = () => { statusEl.textContent = 'reconnecting…'; dot.style.background = '#d98a1f'; };
+    }
+
+    loadHistory().then(connect);
+  </script>
+</body>
+</html>
